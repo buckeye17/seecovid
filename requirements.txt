@@ -1,0 +1,9 @@
+# These are the essential packages needed to build the Heroku app
+# Note, Heroku currently supports Python 3.6 as the newest version,
+# using Python 3.8 will break the app!
+pandas
+scipy
+matplotlib
+dash
+dash_bootstrap_components
+gunicorn
