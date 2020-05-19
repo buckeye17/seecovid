@@ -401,13 +401,13 @@ heat_ctrls_row1 = \
                 dbc.Select(
                     id="map-norm-val",
                     options=[
-                        {"label": "Per 1 Capita", "value": 1},
-                        {"label": "Per 10 Capita", "value": 10},
-                        {"label": "Per 100 Capita", "value": 100},
-                        {"label": "Per 1k Capita", "value": 1000},
-                        {"label": "Per 10k Capita", "value": 10000},
-                        {"label": "Per 100k Capita", "value": 100000},
-                        {"label": "Per 1M Capita", "value": 1000000}
+                        {"label": "1 Capita", "value": 1},
+                        {"label": "10 Capita", "value": 10},
+                        {"label": "100 Capita", "value": 100},
+                        {"label": "1k Capita", "value": 1000},
+                        {"label": "10k Capita", "value": 10000},
+                        {"label": "100k Capita", "value": 100000},
+                        {"label": "1M Capita", "value": 1000000}
                     ],
                     value=100000
                 )
@@ -538,13 +538,13 @@ curve_ctrls_row3 = \
                 dbc.Select(
                     id="curve-norm-val",
                     options=[
-                        {"label": "Per 1 Capita", "value": 1},
-                        {"label": "Per 10 Capita", "value": 10},
-                        {"label": "Per 100 Capita", "value": 100},
-                        {"label": "Per 1k Capita", "value": 1000},
-                        {"label": "Per 10k Capita", "value": 10000},
-                        {"label": "Per 100k Capita", "value": 100000},
-                        {"label": "Per 1M Capita", "value": 1000000}
+                        {"label": "1 Capita", "value": 1},
+                        {"label": "10 Capita", "value": 10},
+                        {"label": "100 Capita", "value": 100},
+                        {"label": "1k Capita", "value": 1000},
+                        {"label": "10k Capita", "value": 10000},
+                        {"label": "100k Capita", "value": 100000},
+                        {"label": "1M Capita", "value": 1000000}
                     ],
                     value=100000
                 )
@@ -1833,7 +1833,7 @@ def edit_plotted_curves(add_click, clear_click, drop_row_id, country, state, \
     # write the new df to the ui data table and to the hidden div
     return curve_plot_df.replace("nan", "").to_dict("records"), \
            [curve_plot_df.to_json(date_format='iso', orient='split')], \
-           [{"label": val, "value": val} for val in curve_plot_df["Row ID"].tolist()], \
+           [{"label": val, "value": val} for val in [""] + curve_plot_df["Row ID"].tolist()], \
            add_click, clear_click
 
 #################################################################
@@ -1967,42 +1967,9 @@ def update_curves_plot(curve_plot_df_as_json, calc, norm_type, norm_val, zero_op
         rgb = cmap(i)[:3] # will return rgba, we take only first 3 so we get rgb
         colors[i] = matplotlib.colors.rgb2hex(rgb)
     
-    # pandas doesn't like df == np.nan, so tests are needed to determine proper syntax
-    # define a function which generically filters for country, state & county
-    def filter_mask_csc(df, country, state, county):
-        if isinstance(county, str):
-            mask = (df["Country/Region"] == country) & \
-                    (df["Province/State"] == state) & \
-                    (df["County"] == county)
-        elif isinstance(state, str):
-            mask = (df["Country/Region"] == country) & \
-                    (df["Province/State"] == state) & \
-                    (df["County"] == "nan")
-        else:
-            mask = (df["Country/Region"] == country) & \
-                    (df["Province/State"] == "nan") & \
-                    (df["County"] == "nan")
-        return mask
-
-    # generate a local df containing only the data that will be plotted
-    # this will make subsequent df manipulation faster
-    mask_bool_ls = [filter_mask_csc(df, curve_plot_df["Country/Region"][i],
-                                    curve_plot_df["Province/State"][i],
-                                    curve_plot_df.County[i]
-                                    )
-                    for i in range(nplaces)
-                   ]
-
-    # the list of masks needs to consolidated via OR into a single mask
-    mask_bool = np.array([False for i in range(df.shape[0])])
-    for mask_bool_item in mask_bool_ls:
-        mask_bool = mask_bool | mask_bool_item
-    plot_df = df[mask_bool]
-
-    # ensure line plots will move left to right
-    plot_df = plot_df.sort_values(["Date"]).reset_index()
-
-    # set options for deriving the Zero_Day column
+    # set options for deriving the Zero_Day column & X-axis label
+    max_zero_day = 0
+    y_min, y_max = 0, 1
     if zero_opt == "None":
         zero_thresh = 1
         thresh_var = "Confirmed"
@@ -2013,80 +1980,119 @@ def update_curves_plot(curve_plot_df_as_json, calc, norm_type, norm_val, zero_op
         zero_thresh = 1/10000
         thresh_var = "ConfirmedPerCapita"
 
-    # initialize values to be ammended in subsequent for loops
-    item_counter = 0
-    max_zero_day = 0
-    min_date = plot_df.Date.max()
-    max_date = plot_df.Date.min()
-
-    # build the figure piecewise, adding traces within for loops
+    # define a blank figure as the default
     fig = go.Figure()
-    for place_i in range(nplaces):
-        
-        # isolate data for place_i
-        curve_row = curve_plot_df.iloc[place_i, :]
-        var_mask_bool = filter_mask_csc(plot_df, \
-                                        curve_row["Country/Region"], \
-                                        curve_row["Province/State"], \
-                                        curve_row["County"])
-        plot_var_df = plot_df[var_mask_bool]
 
-        # calculate zero day column for place_i
-        plot_var_df["Zero_Day"] = 0
-        started_df = plot_var_df[plot_var_df[thresh_var] >= zero_thresh]
-        start_date_series = started_df.Date[:1] - pd.Timedelta(days=1)
-        plot_var_df.Zero_Day = plot_var_df.Date - start_date_series.squeeze()
-        plot_var_df.Zero_Day = plot_var_df.Zero_Day.dt.days
-        plot_var_df = plot_var_df[plot_var_df.Zero_Day > 0]
+    # fill the figure with data if places have been identified by the user
+    if nplaces > 0:
+    
+        # pandas doesn't like df == np.nan, so tests are needed to determine proper syntax
+        # define a function which generically filters for country, state & county
+        def filter_mask_csc(df, country, state, county):
+            if isinstance(county, str):
+                mask = (df["Country/Region"] == country) & \
+                       (df["Province/State"] == state) & \
+                       (df["County"] == county)
+            elif isinstance(state, str):
+                mask = (df["Country/Region"] == country) & \
+                       (df["Province/State"] == state) & \
+                       (df["County"] == "nan")
+            else:
+                mask = (df["Country/Region"] == country) & \
+                       (df["Province/State"] == "nan") & \
+                       (df["County"] == "nan")
+            return mask
 
-        # keep track of x-axis range limits across all plotted places
-        max_zero_day = max([max_zero_day, plot_var_df.Zero_Day.max()])
-        min_date = min([min_date, plot_var_df.Date.min()])
-        max_date = max([max_date, plot_var_df.Date.max()])
+        # generate a local df containing only the data that will be plotted
+        # this will make subsequent df manipulation faster
+        mask_bool_ls = [filter_mask_csc(df, curve_plot_df["Country/Region"][i],
+                                        curve_plot_df["Province/State"][i],
+                                        curve_plot_df.County[i]
+                                        )
+                        for i in range(nplaces)
+                       ]
 
-        # calculate moving average columns for place_i
-        for plot_type in types_ls:
+        # the list of masks needs to consolidated via OR into a single mask
+        mask_bool = np.array([False for i in range(df.shape[0])])
+        for mask_bool_item in mask_bool_ls:
+            mask_bool = mask_bool | mask_bool_item
+        plot_df = df[mask_bool]
 
-            # calculate moving average for accumulating cases
-            var_to_avg = plot_type + calc
-            plot_var_df[var_to_avg + "Avg"] = \
-                plot_var_df[var_to_avg].rolling(avg_period, center=True, min_periods=1).mean()
+        # ensure line plots will move left to right
+        plot_df = plot_df.sort_values(["Date"]).reset_index()
 
-            # calculate moving average for new cases
-            var_pc_to_avg = plot_type + calc + "PerCapita"
-            plot_var_df[var_pc_to_avg + "Avg"] = \
-                plot_var_df[var_pc_to_avg].rolling(avg_period, center=True, min_periods=1).mean()
-        
-        # get the name of place_i
-        place_elements = [elem for elem in curve_row.replace(np.nan, "").values[1:] if elem != ""]
-        place_name = ", ".join(place_elements)
+        # initialize values to be ammended in subsequent for loops
+        item_counter = 0
+        min_date = plot_df.Date.max()
+        max_date = plot_df.Date.min()
 
-        # add traces for each variable type to be plotted for place_i
-        for var in plot_vars_ls:
-            fig = add_cust_traces(fig, var, place_name, plot_var_df, colors[item_counter])
+        # build the figure piecewise, adding traces within for loops
+        for place_i in range(nplaces):
             
-            # add dummy trace for legend only if a single place is being plotted
-            # this will utilize different colors for variable types
-            if nplaces == 1:
+            # isolate data for place_i
+            curve_row = curve_plot_df.iloc[place_i, :]
+            var_mask_bool = filter_mask_csc(plot_df, \
+                                            curve_row["Country/Region"], \
+                                            curve_row["Province/State"], \
+                                            curve_row["County"])
+            plot_var_df = plot_df[var_mask_bool]
+
+            # calculate zero day column for place_i
+            plot_var_df["Zero_Day"] = 0
+            started_df = plot_var_df[plot_var_df[thresh_var] >= zero_thresh]
+            start_date_series = started_df.Date[:1] - pd.Timedelta(days=1)
+            plot_var_df.Zero_Day = plot_var_df.Date - start_date_series.squeeze()
+            plot_var_df.Zero_Day = plot_var_df.Zero_Day.dt.days
+            plot_var_df = plot_var_df[plot_var_df.Zero_Day > 0]
+
+            # keep track of x-axis range limits across all plotted places
+            max_zero_day = max([max_zero_day, plot_var_df.Zero_Day.max()])
+            min_date = min([min_date, plot_var_df.Date.min()])
+            max_date = max([max_date, plot_var_df.Date.max()])
+
+            # calculate moving average columns for place_i
+            for plot_type in types_ls:
+
+                # calculate moving average for accumulating cases
+                var_to_avg = plot_type + calc
+                plot_var_df[var_to_avg + "Avg"] = \
+                    plot_var_df[var_to_avg].rolling(avg_period, center=True, min_periods=1).mean()
+
+                # calculate moving average for new cases
+                var_pc_to_avg = plot_type + calc + "PerCapita"
+                plot_var_df[var_pc_to_avg + "Avg"] = \
+                    plot_var_df[var_pc_to_avg].rolling(avg_period, center=True, min_periods=1).mean()
+            
+            # get the name of place_i
+            place_elements = [elem for elem in curve_row.replace(np.nan, "").values[1:] if elem != ""]
+            place_name = ", ".join(place_elements)
+
+            # add traces for each variable type to be plotted for place_i
+            for var in plot_vars_ls:
+                fig = add_cust_traces(fig, var, place_name, plot_var_df, colors[item_counter])
+                
+                # add dummy trace for legend only if a single place is being plotted
+                # this will utilize different colors for variable types
+                if nplaces == 1:
+                    fig.add_trace(go.Scatter(x=[None],
+                                             y=[None],
+                                             mode='lines+markers',
+                                             name=types_ls[item_counter],
+                                             line=dict(dash="solid",
+                                             color=colors[item_counter]),
+                                  showlegend=True))
+                    item_counter += 1
+
+            # add a dummy trace for legend only if more than one place is being plotted
+            # this will utilize different colors for places
+            if nplaces > 1:
                 fig.add_trace(go.Scatter(x=[None],
                                          y=[None],
-                                         mode='lines+markers',
-                                         name=types_ls[item_counter],
-                                         line=dict(dash="solid",
-                                         color=colors[item_counter]),
-                                showlegend=True))
+                                         mode='lines',
+                                         name=place_name,
+                                         line=dict(dash="solid", color=colors[item_counter]),
+                              showlegend=True))
                 item_counter += 1
-
-        # add a dummy trace for legend only if more than one place is being plotted
-        # this will utilize different colors for places
-        if nplaces > 1:
-            fig.add_trace(go.Scatter(x=[None],
-                                     y=[None],
-                                     mode='lines',
-                                     name=place_name,
-                                     line=dict(dash="solid", color=colors[item_counter]),
-                        showlegend=True))
-            item_counter += 1
 
     axopts = dict(linecolor = "gray", linewidth = 0.5, showline = True, mirror=True)
     fig.update_layout(
@@ -2101,9 +2107,9 @@ def update_curves_plot(curve_plot_df_as_json, calc, norm_type, norm_val, zero_op
             y=-0.25,
             traceorder="reversed",
             font=dict(
-                    family="sans-serif",
-                    size=12,
-                    color="black"),
+                      family="sans-serif",
+                      size=12,
+                      color="black"),
             bgcolor="white",
             bordercolor="gray",
             borderwidth=0.5),
@@ -2137,39 +2143,40 @@ def update_curves_plot(curve_plot_df_as_json, calc, norm_type, norm_val, zero_op
                          showspikes=True, spikesnap="data", spikemode="across", spikethickness=2)
         fig.layout.xaxis.range = [0, max_zero_day*1.1]
     
-    # setup y-axis
-    if y_axis_type == "linear":
-        y_min = 0
-        y_max = 1.1*plot_df[plot_vars_ls].max().max()
-    elif (y_axis_type == "log") & (norm_type == ""):
-        y_vals_arr = plot_df[plot_vars_ls].values.flatten()
-        y_nonzero_vals_arr = y_vals_arr[y_vals_arr != 0]
-        y_min = 0.2
-        y_max = max([0.9*np.log10(max(y_nonzero_vals_arr)), 1.1*np.log10(max(y_nonzero_vals_arr))])
-    elif (y_axis_type == "log") & (norm_type == "PerCapita"):
-        y_vals_arr = plot_df[plot_vars_ls].values.flatten()
-        y_nonzero_vals_arr = y_vals_arr[y_vals_arr != 0]
-        y_min = min([0.9*np.log10(min(y_nonzero_vals_arr)), 1.1*np.log10(min(y_nonzero_vals_arr))])
-        y_max = max([0.9*np.log10(max(y_nonzero_vals_arr)), 1.1*np.log10(max(y_nonzero_vals_arr))])
+    if nplaces > 0:
+        # setup y-axis
+        if y_axis_type == "linear":
+            y_min = 0
+            y_max = 1.1*plot_df[plot_vars_ls].max().max()
+        elif (y_axis_type == "log") & (norm_type == ""):
+            y_vals_arr = plot_df[plot_vars_ls].values.flatten()
+            y_nonzero_vals_arr = y_vals_arr[y_vals_arr != 0]
+            y_min = 0.2
+            y_max = max([0.9*np.log10(max(y_nonzero_vals_arr)), 1.1*np.log10(max(y_nonzero_vals_arr))])
+        elif (y_axis_type == "log") & (norm_type == "PerCapita"):
+            y_vals_arr = plot_df[plot_vars_ls].values.flatten()
+            y_nonzero_vals_arr = y_vals_arr[y_vals_arr != 0]
+            y_min = min([0.9*np.log10(min(y_nonzero_vals_arr)), 1.1*np.log10(min(y_nonzero_vals_arr))])
+            y_max = max([0.9*np.log10(max(y_nonzero_vals_arr)), 1.1*np.log10(max(y_nonzero_vals_arr))])
 
     if calc == "":
         if norm_type == "":
             fig.update_yaxes(title_text="Cumulative Cases", type=y_axis_type, showspikes=True,
-                            spikesnap="data", spikemode="across", spikethickness=2, \
-                            range=[y_min, y_max])
+                             spikesnap="data", spikemode="across", spikethickness=2, \
+                             range=[y_min, y_max])
         elif norm_type == "PerCapita":
             fig.update_yaxes(title_text="Cumulative Cases Per " + logtxt(norm_val) + " Capita", \
-                            showspikes=True, spikesnap="data", spikemode="across",
-                            spikethickness=2, type=y_axis_type, range=[y_min, y_max])
+                             showspikes=True, spikesnap="data", spikemode="across",
+                             spikethickness=2, type=y_axis_type, range=[y_min, y_max])
     elif calc == "PerDate":
         if norm_type == "":
             fig.update_yaxes(title_text="Cases Per Date", showspikes=True, type=y_axis_type,
-                            spikesnap="data", spikemode="across", spikethickness=2, \
-                            range=[y_min, y_max])
+                             spikesnap="data", spikemode="across", spikethickness=2, \
+                             range=[y_min, y_max])
         elif norm_type == "PerCapita":
             fig.update_yaxes(title_text="Cases Per Date Per " + logtxt(norm_val) + " Capita", \
-                            showspikes=True, spikesnap="data", spikemode="across",
-                            spikethickness=2, type=y_axis_type, range=[y_min, y_max])
+                             showspikes=True, spikesnap="data", spikemode="across",
+                             spikethickness=2, type=y_axis_type, range=[y_min, y_max])
     
     return fig
 
