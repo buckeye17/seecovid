@@ -1583,6 +1583,11 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                 state_abbr = bar_df.loc[labels_to_trim, "Province/State"].astype(str).values.tolist()
                 county_state_abbr = [county_abbr[i] + "..., " + state_abbr[i] for i in range(len(county_abbr))]
                 bar_df.loc[labels_to_trim, "AreaLabel"] = county_state_abbr
+            elif map_scope == "Australia":
+                # only one label needs to be trimmed
+                long_label = "Australian Capital Territory"
+                labels_to_trim = bar_df["AreaLabel"].astype(str) == long_label
+                bar_df.loc[labels_to_trim, "AreaLabel"] = long_label[:(max_width_label - 3)] + "..."
 
             # bar labels must be padded so all labels have the same length
             # as some labels disappear and others are introduced,
@@ -1594,51 +1599,51 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
             
             bar_df["ValLabels"] = bar_df[plot_var].astype("float")
             bar_fig_data = go.Bar(x=pad_10_arr(bar_df[plot_var].values, 0, False),
-                                y=pad_10_arr(area_labels, " " * max_width_label, True),
-                                text=pad_10_arr(bar_df.ValLabels.map(bar_txt_format.format).values, "", False),
-                                textposition="auto",
-                                hoverinfo="none",
-                                orientation="h",
-                                marker_color=bar_color,
-                                name="")
+                                  y=pad_10_arr(area_labels, " " * max_width_label, True),
+                                  text=pad_10_arr(bar_df.ValLabels.map(bar_txt_format.format).values, "", False),
+                                  textposition="auto",
+                                  hoverinfo="none",
+                                  orientation="h",
+                                  marker_color=bar_color,
+                                  name="")
         else:
             no_data = True
             bar_fig_data = go.Bar(x=[],
-                                y=[],
-                                orientation="h",
-                                name="")
+                                  y=[],
+                                  orientation="h",
+                                  name="")
         
         # build the heatmap
         heat_fig_data =go.Choroplethmapbox(geojson=geo_json,
-                                        locations=location_series,
-                                        featureidkey=geo_json_name_field,
-                                        z=plot_day_df.CaseVar,
-                                        zmin=0,
-                                        zmax=plot_df.CaseVar.max(),
-                                        customdata=cust_data,
-                                        name="",
-                                        text=plot_day_df.AreaLabel,
-                                        hovertemplate="<b>%{text}</b><br>" + \
-                                                        "<b>Cases</b>: %{customdata[0]:,}<br>" + \
-                                                        "<b>" + map_log_hvr_txt + "</b>: %{customdata[1]:.2e}",
-                                        colorbar=dict(outlinewidth=1,
-                                                        outlinecolor="#333333",
-                                                        len=0.9,
-                                                        lenmode="fraction",
-                                                        xpad=30,
-                                                        xanchor="right",
-                                                        bgcolor=None,
-                                                        title=dict(text="Cases",
+                                           locations=location_series,
+                                           featureidkey=geo_json_name_field,
+                                           z=plot_day_df.CaseVar,
+                                           zmin=0,
+                                           zmax=plot_df.CaseVar.max(),
+                                           customdata=cust_data,
+                                           name="",
+                                           text=plot_day_df.AreaLabel,
+                                           hovertemplate="<b>%{text}</b><br>" + \
+                                                         "<b>Cases</b>: %{customdata[0]:,}<br>" + \
+                                                         "<b>" + map_log_hvr_txt + "</b>: %{customdata[1]:.2e}",
+                                           colorbar=dict(outlinewidth=1,
+                                                         outlinecolor="#333333",
+                                                         len=0.9,
+                                                         lenmode="fraction",
+                                                         xpad=30,
+                                                         xanchor="right",
+                                                         bgcolor=None,
+                                                         title=dict(text="Cases",
                                                                     font=dict(size=14)),
-                                                        tickvals=map_tick_vals,
-                                                        ticktext=map_tick_txt,
-                                                        tickcolor="#333333",
-                                                        tickwidth=2,
-                                                        tickfont=dict(color="#333333",
-                                                                    size=12)),
-                                        colorscale=heat_color_scale,
-                                        marker_opacity=0.7,
-                                        marker_line_width=0)
+                                                         tickvals=map_tick_vals,
+                                                         ticktext=map_tick_txt,
+                                                         tickcolor="#333333",
+                                                         tickwidth=2,
+                                                         tickfont=dict(color="#333333",
+                                                                       size=12)),
+                                           colorscale=heat_color_scale,
+                                           marker_opacity=0.7,
+                                           marker_line_width=0)
 
         # define animation controls
         fig_ctrls = []
@@ -1647,25 +1652,25 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
         # only define the animation controls of there is data to plot
         if plot_df[plot_var].max() > 0:
             fig_ctrls = [dict(type="buttons",
-                            buttons=[dict(label="Play",
+                              buttons=[dict(label="Play",
                                             method="animate",
                                             args=[None,
                                                 dict(frame=dict(duration=frame_dur,
                                                                 redraw=True),
-                                                    fromcurrent=True)]),
+                                                     fromcurrent=True)]),
                                     dict(label="Pause",
-                                            method="animate",
-                                            args=[[None],
-                                                dict(frame=dict(duration=0,
-                                                                redraw=True),
+                                         method="animate",
+                                         args=[[None],
+                                               dict(frame=dict(duration=0,
+                                                               redraw=True),
                                                     mode="immediate")])],
-                                direction="left",
-                                pad={"r": 10, "t": 35},
-                                showactive=False,
-                                x=0.1,
-                                xanchor="right",
-                                y=0,
-                                yanchor="top")]
+                              direction="left",
+                              pad={"r": 10, "t": 35},
+                              showactive=False,
+                              x=0.1,
+                              xanchor="right",
+                              y=0,
+                              yanchor="top")]
 
             if (not is_init):
                 sliders_dict = dict(active=init_date_ind,
@@ -1673,11 +1678,11 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                                     yanchor="top",
                                     xanchor="left",
                                     currentvalue=dict(font=dict(size=14),
-                                                    prefix="Plotted Date: ",
-                                                    visible=True,
-                                                    xanchor="center"),
+                                                      prefix="Plotted Date: ",
+                                                      visible=True,
+                                                      xanchor="center"),
                                     pad=dict(b=10,
-                                            t=10),
+                                             t=10),
                                     len=0.875,
                                     x=0.125,
                                     y=0,
@@ -1700,6 +1705,18 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                 bar_df = bar_df[bar_df.CaseVar > -np.inf]
                 nrows = bar_df.shape[0]
                 bar_df = bar_df.iloc[np.arange(nrows - 1, -1, -1),:] # reverse order of top 10 rows
+                if map_scope == "UScounties":
+                    labels_to_trim = bar_df["AreaLabel"].astype(str).str.len() > max_width_label
+                    county_len_arr = max_width_label - 5 - bar_df.loc[labels_to_trim, "Province/State"].astype(str).str.len().values
+                    county_abbr = [bar_df.loc[labels_to_trim, "County"].astype(str).values[i][:county_len_arr[i]] \
+                                for i in range(len(county_len_arr))]
+                    state_abbr = bar_df.loc[labels_to_trim, "Province/State"].astype(str).values.tolist()
+                    county_state_abbr = [county_abbr[i] + "..., " + state_abbr[i] for i in range(len(county_abbr))]
+                    bar_df.loc[labels_to_trim, "AreaLabel"] = county_state_abbr
+                elif map_scope == "Australia":
+                    long_label = "Australian Capital Territory"
+                    labels_to_trim = bar_df["AreaLabel"].astype(str) == long_label
+                    bar_df.loc[labels_to_trim, "AreaLabel"] = long_label[:(max_width_label - 3)] + "..."
                 area_labels = [label.rjust(max_width_label) for label in bar_df.AreaLabel.values]
                 if map_norm_type == "PerCapita":
                     bar_df[plot_var] = bar_df[plot_var] * map_norm_val
@@ -1711,51 +1728,51 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                                                 values*map_norm_val))[0]
                 location_series = plot_day_df[location_var]
                 
-                # define the frame, repeatinf what was done for the initial plots above
+                # define the frame, repeating what was done for the initial plots above
                 frame = go.Frame(data=[go.Bar(x=pad_10_arr(bar_df[plot_var].values, 0, False),
-                                            y=pad_10_arr(area_labels, " " * max_width_label, True),
-                                            text=pad_10_arr(bar_df.ValLabels.map(bar_txt_format.format). \
-                                                                    values, "", False),
-                                            textposition="auto",
-                                            hoverinfo="none",
-                                            name=""),
-                                    go.Choroplethmapbox(locations=location_series,
-                                                        featureidkey=geo_json_name_field,
-                                                        z=plot_day_df.CaseVar,
-                                                        customdata=cust_data,
-                                                        name="",
-                                                        text=plot_day_df.AreaLabel,
-                                                        hovertemplate="<b>%{text}</b><br>" + \
-                                                                        "<b>Cases</b>: %{customdata[0]:,}<br>" + \
-                                                                        "<b>" + map_log_hvr_txt + "</b>: %{customdata[1]:.2e}")],
-                                name=numpy_dt64_to_str(day))
+                                              y=pad_10_arr(area_labels, " " * max_width_label, True),
+                                              text=pad_10_arr(bar_df.ValLabels.map(bar_txt_format.format). \
+                                                                     values, "", False),
+                                              textposition="auto",
+                                              hoverinfo="none",
+                                              name=""),
+                                       go.Choroplethmapbox(locations=location_series,
+                                                           featureidkey=geo_json_name_field,
+                                                           z=plot_day_df.CaseVar,
+                                                           customdata=cust_data,
+                                                           name="",
+                                                           text=plot_day_df.AreaLabel,
+                                                           hovertemplate="<b>%{text}</b><br>" + \
+                                                                         "<b>Cases</b>: %{customdata[0]:,}<br>" + \
+                                                                         "<b>" + map_log_hvr_txt + "</b>: %{customdata[1]:.2e}")],
+                                 name=numpy_dt64_to_str(day))
                 fig_frames.append(frame)
 
                 # define the slider step
                 slider_step = dict(args=[[numpy_dt64_to_str(day)],
-                                        dict(mode="immediate",
-                                            frame=dict(duration=300,
-                                                        redraw=True))],
-                                method="animate",
-                                label=numpy_dt64_to_str(day))
+                                         dict(mode="immediate",
+                                              frame=dict(duration=300,
+                                                         redraw=True))],
+                                   method="animate",
+                                   label=numpy_dt64_to_str(day))
                 sliders_dict["steps"].append(slider_step)
 
         # Assemble the entire figure based on the components defined above
         fig = subplots.make_subplots(rows=1, cols=2, column_widths=[0.2, 0.8],
-                                    subplot_titles=("Top 10 " + title, ""),
-                                    horizontal_spacing=0.05,
-                                    specs=[[{"type": "bar"},
-                                            {"type": "choroplethmapbox"}]])
+                                     subplot_titles=("Top 10 " + title, ""),
+                                     horizontal_spacing=0.05,
+                                     specs=[[{"type": "bar"},
+                                             {"type": "choroplethmapbox"}]])
         fig.add_trace(bar_fig_data, row=1, col=1)
         fig.add_trace(heat_fig_data, row=1, col=2)
         fig.update_layout(mapbox_style="light",
-                        mapbox_zoom=init_zoom,
-                        mapbox_accesstoken=token,
-                        mapbox_center=map_center,
-                        margin={"r":10,"t":30,"l":10,"b":10},
-                        plot_bgcolor="white",
-                        sliders=[sliders_dict],
-                        updatemenus=fig_ctrls)
+                          mapbox_zoom=init_zoom,
+                          mapbox_accesstoken=token,
+                          mapbox_center=map_center,
+                          margin={"r":10,"t":30,"l":10,"b":10},
+                          plot_bgcolor="white",
+                          sliders=[sliders_dict],
+                          updatemenus=fig_ctrls)
         fig["frames"] = fig_frames
         
         # update the bar plot axes
@@ -1764,22 +1781,24 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
             fig.update_yaxes(showticklabels=False)
         else:
             fig.update_xaxes(type=bar_scale_type,
-                            ticks="outside",
-                            range=bar_range,
-                            showgrid=True,
-                            gridwidth=0.5,
-                            gridcolor="#CCCCCC")
+                             ticks="outside",
+                             range=bar_range,
+                             showgrid=True,
+                             gridwidth=0.5,
+                             gridcolor="#CCCCCC")
+            fig.update_yaxes(tickfont=dict(family="Courier New, monospace",
+                                           size=13))
 
         if no_data:
             # add annotation when theres no data explaining as such
             fig["layout"]["annotations"] = [dict(x=0,
-                                                y=0,
-                                                xref="x1", 
-                                                yref="y1",
-                                                text="All<br>" + title + "<br>have reported<br>zero " + \
-                                                    map_var + "<br>cases to date",
-                                                showarrow=False,
-                                                font=dict(size=16))]
+                                                 y=0,
+                                                 xref="x1", 
+                                                 yref="y1",
+                                                 text="All<br>" + title + "<br>have reported<br>zero " + \
+                                                      map_var + "<br>cases to date",
+                                                 showarrow=False,
+                                                 font=dict(size=16))]
         else:
             # modify the bar plot title font properties
             fig["layout"]["annotations"][0]["font"] = dict(size=16)
