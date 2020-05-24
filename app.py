@@ -1490,6 +1490,7 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
         map_log_hvr_txt = "Cases per " + log_txt[int(np.log10(map_norm_val)) + 6] + " Capita: "
         if map_scale == "Logarithmic":
             bar_scale_type = "log"
+            map_tick_mode = "array"
             map_tick_vals = np.arange(-6, 7)
             map_tick_txt = log_txt
             
@@ -1502,8 +1503,9 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
         
         else:
             bar_scale_type = "linear"
-            map_tick_vals = None
-            map_tick_txt = None
+            map_tick_mode = "auto"
+            map_tick_vals = []
+            map_tick_txt = []
 
             if map_norm_type == "PerCapita":
                 plot_df["CaseVar"] = plot_df[plot_var]*map_norm_val
@@ -1635,6 +1637,7 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                                                          bgcolor=None,
                                                          title=dict(text="Cases",
                                                                     font=dict(size=14)),
+                                                         tickmode=map_tick_mode,
                                                          tickvals=map_tick_vals,
                                                          ticktext=map_tick_txt,
                                                          tickcolor="#333333",
