@@ -17,13 +17,14 @@
 # 14 Callbacks to Update UI of the Second Epidemiology Sandbox
 # 15 Callback for Updating the Second Epidemiology Sandbox Figure
 
+import time
 import os
+import platform
 import json
 import pickle
 import base64
 from urllib.request import urlopen
-#from pydrive.auth import GoogleAuth
-#from pydrive.drive import GoogleDrive
+import boto3
 import pandas as pd
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -42,26 +43,48 @@ from plotly import graph_objects as go
 # 1 Environment Setup
 # setup global variables
 proj_path = ""
+print("The execution environment is: ")
+print(platform.release())
 if os.name == "nt":
     # running on my local Windows machine
     ENV = "local"
+    os.chdir("C:/Users/adiad/Anaconda3/envs/CovidApp36/covidapp/")
+elif "microsoft" in platform.release(): 
+    # example: "4.19.104-microsoft-standard"
+    # running on wsl in a docker container I made
+    ENV = "docker-wsl"
+    proj_path = "/docker_app/"
+elif ("aws" in platform.release()) | ("amzn" in platform.release()): 
+    # examples: "4.4.0-1074-aws", "4.14.158-129.185.amzn2.x86_64"
+    # running in a docker container I made
+    ENV = "docker-aws"
 else:
     # running on heroku server
     ENV = "heroku"
 
-if ENV == "local":
-    import os
-    os.chdir("C:/Users/adiad/Anaconda3/envs/CovidApp36/covidapp/")
+if ENV in ["docker-aws", "heroku"]:
+    # download covid data from aws s3 bucket
+    os.environ["AWS_CONFIG_FILE"] = proj_path + "secret_credentials/config"
+    os.environ["AWS_SHARED_CREDENTIALS_FILE"] = proj_path + "secret_credentials/credentials"
+    bucket_name = "my-covid-data-7918"
+    local_file_path = proj_path + "data_clean/"
+    covid_filenames = ["Johns_Hopkins_Clean.pkl", "init_heatmap.pkl"]
+
+    s3 = boto3.client("s3")
+    for file_name in covid_filenames:
+        os.remove(local_file_path + file_name)
+        s3.download_file(bucket_name, file_name, local_file_path + file_name)
+    print("Finished downloading covid data from AWS.")
 
 # set graphic elements & color palette
 invis = "rgba(0,0,0,0)"
 
 update_jh_data = True # controls whether Johns Hopkins data will be updated
-data_path = "data_clean/"
-secrets_path = "secret_credentials/"
+data_path = proj_path + "data_clean/"
+secrets_path = proj_path + "secret_credentials/"
 
 # setting up images for rendering
-image_path = "images/"
+image_path = proj_path + "images/"
 cross_icon_image = base64.b64encode(open(image_path + "icon.png", "rb").read())
 herd_immunity_image = base64.b64encode(open(image_path + "Herd_Immunity_Fig.png", "rb").read())
 
@@ -101,21 +124,6 @@ with open(data_path + "all_countries_geo.json") as f:
 # read initial heatmap figure file
 with open(data_path + "init_heatmap.pkl", "rb") as f:
     init_heatmap = pickle.load(f)
-
-# The following code has been omitted because the authentication process with Google
-# cannot be completed on Heroku, it requires the user to use a web browser.
-# Update Johns Hopkins data from my Google Drive
-#if (ENV == "heroku") & (update_jh_data):
-#    gauth = GoogleAuth()
-#    gauth.LoadClientConfigFile(secrets_path + "client_secrets.json")
-#
-#    drive = GoogleDrive(gauth)
-#
-#    # define file to get from Google Drive
-#    gd_file = drive.CreateFile({'id': '1KuubeQzOHAzh_TuNyK2w1XO_L8zXHTRF'})
-#
-#    # download the file and save it as defined
-#    gd_file.GetContentFile(data_path + "Johns_Hopkins_Clean.pkl")
 
 #################################################################
 # 2 Setup Dataframes
@@ -157,10 +165,15 @@ sandbox2_df = pd.DataFrame([[0, 14, 3.0, True, True], \
 #################################################################
 # 3 Define Useful Functions
 
-# converts numpy's datetime64 dtype (used by pandas) to a string
-def numpy_dt64_to_str(dt64):
+# converts numpy's datetime64 dtype (used by pandas) to datetime.datetime()
+def numpy_dt64_to_dt(dt64):
     day_timestamp_dt = (dt64 - np.datetime64('1970-01-01T00:00:00Z')) / np.timedelta64(1, 's')
     day_dt = dt.datetime.utcfromtimestamp(day_timestamp_dt)
+    return day_dt
+
+# converts numpy's datetime64 dtype (used by pandas) to a string
+def numpy_dt64_to_str(dt64):
+    day_dt = numpy_dt64_to_dt(dt64)
     return day_dt.strftime("%b %d")
 
 # Define function for predicting epidemic, used in sandboxes
@@ -282,6 +295,10 @@ def predict_sir(N, params_t, dur):
 
     return np.column_stack((t, s, i, r))
 
+# find the most recent date in the initial heatmap
+init_days = np.sort(df[df["MapScope"] == "US Counties"].Date.unique())
+init_heatmap_date = numpy_dt64_to_dt(init_days[-1])
+
 # Basic setup of Dash app
 external_stylesheets = [dbc.themes.COSMO]
 btn_color = "primary"
@@ -297,13 +314,13 @@ app.index_string = """<!DOCTYPE html>
 <html>
     <head>
         <!-- Global site tag (gtag.js) - Google Analytics -->
-        <script async src="https://www.googletagmanager.com/gtag/js?id=UA-44205806-2"></script>
+        <script async src="https://www.googletagmanager.com/gtag/js?id=UA-44205806-4"></script>
         <script>
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
 
-            gtag('config', 'UA-44205806-2');
+            gtag('config', 'UA-44205806-4');
         </script>
         {%metas%}
         <title>{%title%}</title>
@@ -560,7 +577,7 @@ curve_ctrls_row3 = \
                         {"label": "When 1 case is reported", "value": "Total"},
                         {"label": "When 1 case per 10k capita", "value": "PerCapita"},
                     ],
-                    value="Total"
+                    value="None"
                 )
             ])
         ]), md=6, xs=12, style={"padding": "5px 10px"}),
@@ -613,11 +630,6 @@ curve_ctrls_row3 = \
                             step=1,
                             value=14,
                             included=False
-                        ),
-                        dbc.Tooltip(
-                            "Curve fitting is calculated with a moving average.  This parameter " + \
-                            "determines the max number of days to use in averaging each point.",
-                            target="curve-avg-period",
                         ),
                     ], style={"width": "100%", "display": "inline-block"})
                 ], style={"width": "60%", "text-align": "left", "padding": "10px 0 0 0"})
@@ -820,13 +832,25 @@ app.layout = html.Div([
         dbc.Tab([
             heat_cntrls_accordion,
             dbc.Row(dbc.Spinner(type="grow", color="primary", fullscreen=True), id="initial-spinner"),
-            dbc.Row(dbc.Col(html.Div([dcc.Loading(dcc.Graph(id="heatmap", figure=blank_fig),
-                                                  type="cube")]))),
-            html.Div([dcc.Markdown('''
-            *Playing the animation may cause iratic behavior if your browser isn't powerful 
-            enough.  In this case, reload the page and jump to desired dates with the slider.
-            ''', style={"textAlign": "center", "fontSize": "small"}
-            )]),
+
+            # Date Picker
+            dbc.Row([
+                dbc.Col(html.Div([""]), xs=5),
+                dbc.Col(html.Div([
+                    dbc.InputGroup([
+                        dbc.InputGroupAddon("Select Plotted Date:", addon_type="prepend"),
+                        dcc.DatePickerSingle(
+                            id="heat-date-picker",
+                            date=init_heatmap_date,
+                            display_format="MMM Do, YYYY"
+                        )
+                    ]) 
+                ]), xs=7),
+            ], style={'padding-left': 20, 'padding-right': 20, 'margin-top': 15, 'margin-bottom': 0}),
+
+            dbc.Row(
+                dbc.Col(html.Div([dcc.Loading(dcc.Graph(id="heatmap", figure=blank_fig), type="cube")]))
+            ),
         ], label="Heatmaps"),
 
         # curves tab
@@ -834,7 +858,8 @@ app.layout = html.Div([
             curve_cntrls_accordion,
             dbc.Row(dbc.Col(html.Div([dcc.Loading(dcc.Graph(id="curves",
                                                             responsive=True,
-                                                            style={"height": 400}), type="cube")]))),
+                                                            style={"height": 400}),
+                                                  type="cube")]))),
         ], label="The Curves"),
 
         # epidemiology tab
@@ -1384,17 +1409,27 @@ def state_selected(state):
 # 10 Callback for Updating Heat Map Figure
 @app.callback(
     [Output("heatmap", "figure"),
-     Output("initial-spinner", "style")],
+     Output("initial-spinner", "style"),
+     Output("heat-date-picker", "min_date_allowed"),
+     Output("heat-date-picker", "max_date_allowed")],
     [Input("map-scope", "value"),
      Input("map-var", "value"),
      Input("map-calc", "value"),
      Input("map-scale", "value"),
      Input("map-norm-type", "value"),
-     Input("map-norm-val", "value")],
+     Input("map-norm-val", "value"),
+     Input("heat-date-picker", "date")],
     [State("initial-spinner", "style")]
 )
-def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_norm_val,
+def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_norm_val, map_date,
                    init_spinner_style):
+
+    #tic = time.perf_counter()
+    #toc_a = tic
+    #toc_b = tic
+
+    # for an unknown reason, [map_norm_val] is provided as a string, so cast it back to an int
+    map_norm_val = int(map_norm_val)
     
     # test if this is the initial execution of this callback
     is_init = (init_spinner_style is None)
@@ -1402,6 +1437,12 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
     # only generate a new heatmap if the user initialized this callback
     if is_init:
         fig = init_heatmap
+
+        # determine valid date range for the date picker
+        plot_df = df[df["MapScope"] == "US Counties"]
+        days = np.sort(plot_df.Date.unique())
+        picker_min_date = numpy_dt64_to_dt(days[0])
+        picker_max_date = numpy_dt64_to_dt(days[-1])
 
     else:
 
@@ -1411,8 +1452,6 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
         if map_norm_type == "None":
             map_norm_type = ""
         plot_var = map_var + map_calc + map_norm_type
-
-        frame_dur = 1000 # milliseconds, controls animation speed
 
         # set variables conditioned on the map scope
         if map_scope == "UScounties":
@@ -1476,17 +1515,24 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
             init_zoom = 0
 
         # set axis variables conditioned on scale settings
-        var_finite = plot_df[plot_var].values
-        var_finite = var_finite[(var_finite != 0) & (var_finite != -np.inf) & (var_finite != np.inf)]
-        if len(var_finite) > 0:
-            var_min = min(var_finite)
-            var_max = max(var_finite)
-        else:
-            var_min = 0
-            var_max = 0
+        def get_min_max(x_arr):
+            var_finite = x_arr[(x_arr != 0) & (x_arr != -np.inf) & (x_arr != np.inf)]
+            if len(var_finite) > 0:
+                var_min = min(var_finite)
+                var_max = max(var_finite)
+            else:
+                var_min = 0
+                var_max = 0
+            return var_min, var_max
         
+        # determine valid date range for the date picker
+        days = np.sort(plot_df.Date.unique())
+        picker_min_date = numpy_dt64_to_dt(days[0]) 
+        picker_max_date = numpy_dt64_to_dt(days[-1])
+        
+        # setup scales
         log_txt = ["1e-6", "1e-5", "1e-4", ".001", ".01", ".1", \
-                "1", "10", "100", "1K", "10K", "100K", "1M"]
+                   "1", "10", "100", "1K", "10K", "100K", "1M"]
         map_log_hvr_txt = "Cases per " + log_txt[int(np.log10(map_norm_val)) + 6] + " Capita: "
         if map_scale == "Logarithmic":
             bar_scale_type = "log"
@@ -1496,10 +1542,12 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
             
             if map_norm_type == "PerCapita":
                 plot_df["CaseVar"] = np.log10(plot_df[plot_var]*map_norm_val)
-                bar_range = np.log10(np.array([var_min, var_max])*map_norm_val)
+                
             else:
                 plot_df["CaseVar"] = np.log10(plot_df[plot_var])
-                bar_range = np.log10(np.array([var_min, var_max]))
+            
+            var_min, var_max = get_min_max(plot_df.CaseVar.values)
+            plot_range = np.array([var_min, var_max])
         
         else:
             bar_scale_type = "linear"
@@ -1509,10 +1557,12 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
 
             if map_norm_type == "PerCapita":
                 plot_df["CaseVar"] = plot_df[plot_var]*map_norm_val
-                bar_range = np.array([0, var_max])*map_norm_val
+
             else:
                 plot_df["CaseVar"] = plot_df[plot_var]
-                bar_range = np.array([0, var_max])
+            
+            var_min, var_max = get_min_max(plot_df.CaseVar.values)
+            plot_range = np.array([0, var_max])
         
         if map_var == "Recovered":
             heat_color_scale = "ylgn"
@@ -1520,18 +1570,9 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
         else:
             heat_color_scale = "ylorrd"
             bar_color = "rgb(236, 62, 19)"
-        
-        days = np.sort(plot_df.Date.unique())
 
-        # when the figure first loads, show the most recent date which has some data to plot
-        if len(var_finite) > 0:
-            date_has_data_df = plot_df.groupby(["Date"]).sum().reset_index()
-            init_date = date_has_data_df.loc[date_has_data_df[plot_var] > 0, "Date"].max()
-            init_date_ind = np.where(days == init_date.to_datetime64())[0][0]
-        else:
-            init_date = days[-1]
-            init_date_ind = len(days) - 1
-        plot_day_df = plot_df[plot_df.Date == init_date]
+        # limit remaining calcs to data pertaining to picked date
+        plot_day_df = plot_df[plot_df.Date == map_date]
 
         # define custom hover data
         cust_data = np.dstack((plot_day_df.loc[:, map_var + map_calc].values, \
@@ -1544,7 +1585,7 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
             bar_txt_format = "{:,.0f}"
         
         # define the left bar plot
-        bar_df = plot_day_df.nlargest(10, plot_var, keep="all").reset_index()
+        bar_df = plot_day_df.nlargest(10, "CaseVar", keep="all").reset_index()
         bar_df = bar_df.head(10) # nlargest may return more than 10 rows if there are duplicate values
         bar_df = bar_df[bar_df.CaseVar > -np.inf]
         nrows = bar_df.shape[0]
@@ -1570,7 +1611,7 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
             return result
 
         # only build the bar plot if there is data to plot
-        if plot_df[plot_var].max() > 0:
+        if plot_day_df[plot_var].max() > 0:
             no_data = False
 
             max_width_label = 25
@@ -1586,6 +1627,7 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                 county_state_abbr = [county_abbr[i] + "..., " + state_abbr[i] for i in range(len(county_abbr))]
                 bar_df.loc[labels_to_trim, "AreaLabel"] = county_state_abbr
             elif map_scope == "Australia":
+
                 # only one label needs to be trimmed
                 long_label = "Australian Capital Territory"
                 labels_to_trim = bar_df["AreaLabel"].astype(str) == long_label
@@ -1595,12 +1637,13 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
             # as some labels disappear and others are introduced,
             # varied-length label cause bad animation behavior
             area_labels = [label.rjust(max_width_label) for label in bar_df.AreaLabel.values]
-
-            if map_norm_type == "PerCapita":
-                bar_df[plot_var] = bar_df[plot_var] * map_norm_val
             
-            bar_df["ValLabels"] = bar_df[plot_var].astype("float")
-            bar_fig_data = go.Bar(x=pad_10_arr(bar_df[plot_var].values, 0, False),
+            if map_scale == "Logarithmic":
+                bar_df["CaseVarPlot"] = np.power(np.ones(10)*10, bar_df.CaseVar.values)
+            else:
+                bar_df["CaseVarPlot"] = bar_df.CaseVar
+            bar_df["ValLabels"] = bar_df.CaseVarPlot.astype("float")
+            bar_fig_data = go.Bar(x=pad_10_arr(bar_df.CaseVarPlot.values, 0, False),
                                   y=pad_10_arr(area_labels, " " * max_width_label, True),
                                   text=pad_10_arr(bar_df.ValLabels.map(bar_txt_format.format).values, "", False),
                                   textposition="auto",
@@ -1620,8 +1663,8 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                                            locations=location_series,
                                            featureidkey=geo_json_name_field,
                                            z=plot_day_df.CaseVar,
-                                           zmin=0,
-                                           zmax=plot_df.CaseVar.max(),
+                                           zmin=plot_range[0], # min([plot_df.CaseVar.min(), 0]),
+                                           zmax=plot_range[1], # plot_df.CaseVar.max(),
                                            customdata=cust_data,
                                            name="",
                                            text=plot_day_df.AreaLabel,
@@ -1648,117 +1691,126 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                                            marker_opacity=0.7,
                                            marker_line_width=0)
 
-        # define animation controls
-        fig_ctrls = []
-        sliders_dict = dict()
-
-        # only define the animation controls of there is data to plot
-        if plot_df[plot_var].max() > 0:
-            fig_ctrls = [dict(type="buttons",
-                              buttons=[dict(label="Play",
-                                            method="animate",
-                                            args=[None,
-                                                dict(frame=dict(duration=frame_dur,
-                                                                redraw=True),
-                                                     fromcurrent=True)]),
-                                    dict(label="Pause",
-                                         method="animate",
-                                         args=[[None],
-                                               dict(frame=dict(duration=0,
-                                                               redraw=True),
-                                                    mode="immediate")])],
-                              direction="left",
-                              pad={"r": 10, "t": 35},
-                              showactive=False,
-                              x=0.1,
-                              xanchor="right",
-                              y=0,
-                              yanchor="top")]
-
-            if (not is_init):
-                sliders_dict = dict(active=init_date_ind,
-                                    visible=True,
-                                    yanchor="top",
-                                    xanchor="left",
-                                    currentvalue=dict(font=dict(size=14),
-                                                      prefix="Plotted Date: ",
-                                                      visible=True,
-                                                      xanchor="center"),
-                                    pad=dict(b=10,
-                                             t=10),
-                                    len=0.875,
-                                    x=0.125,
-                                    y=0,
-                                    steps=[])
-
-        # define the animation frames
-        fig_frames = []
-        if is_init:
-            fig_frames = init_fig_frames
-            sliders_dict = init_slider_steps
-
-        # only define the animation frames if there is data to plot
-        elif plot_df[plot_var].max() > 0:
-            for day in days:
-
-                # this code repeating what was done to build the initial bar plot above
-                plot_day_df = plot_df[plot_df.Date == day]
-                bar_df = plot_day_df.nlargest(10, plot_var, keep="all").reset_index()
-                bar_df = bar_df.head(10) # nlargest may return more than 10 rows if there are duplicate values
-                bar_df = bar_df[bar_df.CaseVar > -np.inf]
-                nrows = bar_df.shape[0]
-                bar_df = bar_df.iloc[np.arange(nrows - 1, -1, -1),:] # reverse order of top 10 rows
-                if map_scope == "UScounties":
-                    labels_to_trim = bar_df["AreaLabel"].astype(str).str.len() > max_width_label
-                    county_len_arr = max_width_label - 5 - bar_df.loc[labels_to_trim, "Province/State"].astype(str).str.len().values
-                    county_abbr = [bar_df.loc[labels_to_trim, "County"].astype(str).values[i][:county_len_arr[i]] \
-                                for i in range(len(county_len_arr))]
-                    state_abbr = bar_df.loc[labels_to_trim, "Province/State"].astype(str).values.tolist()
-                    county_state_abbr = [county_abbr[i] + "..., " + state_abbr[i] for i in range(len(county_abbr))]
-                    bar_df.loc[labels_to_trim, "AreaLabel"] = county_state_abbr
-                elif map_scope == "Australia":
-                    long_label = "Australian Capital Territory"
-                    labels_to_trim = bar_df["AreaLabel"].astype(str) == long_label
-                    bar_df.loc[labels_to_trim, "AreaLabel"] = long_label[:(max_width_label - 3)] + "..."
-                area_labels = [label.rjust(max_width_label) for label in bar_df.AreaLabel.values]
-                if map_norm_type == "PerCapita":
-                    bar_df[plot_var] = bar_df[plot_var] * map_norm_val
-                bar_df["ValLabels"] = bar_df[plot_var].astype("float")
-
-                # this code repeats what was done to build the initial heatmap above
-                cust_data = np.dstack((plot_day_df.loc[:, map_var + map_calc].values, \
-                                    plot_day_df.loc[:, map_var + map_calc + "PerCapita"]. \
-                                                values*map_norm_val))[0]
-                location_series = plot_day_df[location_var]
-                
-                # define the frame, repeating what was done for the initial plots above
-                frame = go.Frame(data=[go.Bar(x=pad_10_arr(bar_df[plot_var].values, 0, False),
-                                              y=pad_10_arr(area_labels, " " * max_width_label, True),
-                                              text=pad_10_arr(bar_df.ValLabels.map(bar_txt_format.format). \
-                                                                     values, "", False),
-                                              textposition="auto",
-                                              hoverinfo="none",
-                                              name=""),
-                                       go.Choroplethmapbox(locations=location_series,
-                                                           featureidkey=geo_json_name_field,
-                                                           z=plot_day_df.CaseVar,
-                                                           customdata=cust_data,
-                                                           name="",
-                                                           text=plot_day_df.AreaLabel,
-                                                           hovertemplate="<b>%{text}</b><br>" + \
-                                                                         "<b>Cases</b>: %{customdata[0]:,}<br>" + \
-                                                                         "<b>" + map_log_hvr_txt + "</b>: %{customdata[1]:.2e}")],
-                                 name=numpy_dt64_to_str(day))
-                fig_frames.append(frame)
-
-                # define the slider step
-                slider_step = dict(args=[[numpy_dt64_to_str(day)],
-                                         dict(mode="immediate",
-                                              frame=dict(duration=300,
-                                                         redraw=True))],
-                                   method="animate",
-                                   label=numpy_dt64_to_str(day))
-                sliders_dict["steps"].append(slider_step)
+        ###########################################################
+        # The following code block was used in the original app to
+        # build an animation of the heatmap and bar charts.  But 
+        # this function has become too slow as months of data have 
+        # accumulated.
+        #
+        ## define animation controls
+        #frame_dur = 1000 # milliseconds, controls animation speed
+        #fig_ctrls = []
+        #sliders_dict = dict()
+        #
+        ## only define the animation controls of there is data to plot
+        #if plot_df[plot_var].max() > 0:
+        #    fig_ctrls = [dict(type="buttons",
+        #                      buttons=[dict(label="Play",
+        #                                    method="animate",
+        #                                    args=[None,
+        #                                        dict(frame=dict(duration=frame_dur,
+        #                                                        redraw=True),
+        #                                             fromcurrent=True)]),
+        #                            dict(label="Pause",
+        #                                 method="animate",
+        #                                 args=[[None],
+        #                                       dict(frame=dict(duration=0,
+        #                                                       redraw=True),
+        #                                            mode="immediate")])],
+        #                      direction="left",
+        #                      pad={"r": 10, "t": 35},
+        #                      showactive=False,
+        #                      x=0.1,
+        #                      xanchor="right",
+        #                      y=0,
+        #                      yanchor="top")]
+        #
+        #    if (not is_init):
+        #        sliders_dict = dict(active=init_date_ind,
+        #                            visible=True,
+        #                            yanchor="top",
+        #                            xanchor="left",
+        #                            currentvalue=dict(font=dict(size=14),
+        #                                              prefix="Plotted Date: ",
+        #                                              visible=True,
+        #                                              xanchor="center"),
+        #                            pad=dict(b=10,
+        #                                     t=10),
+        #                            len=0.875,
+        #                            x=0.125,
+        #                            y=0,
+        #                            steps=[])
+        # 
+        ##toc_a = time.perf_counter()
+        #
+        ## define the animation frames
+        #fig_frames = []
+        #
+        #for day in days:
+        #
+        #    # this code repeating what was done to build the initial bar plot above
+        #    # .query() method provides faster filtering
+        #    plot_day_df = plot_df.query("Date == @day") #plot_day_df = plot_df[plot_df.Date == day]
+        #    bar_df = plot_day_df.nlargest(10, "CaseVar", keep="all").reset_index()
+        #    bar_df = bar_df.head(10) # nlargest may return more than 10 rows if there are duplicate values
+        #    INF = np.inf
+        #    bar_df = bar_df.query("CaseVar > - @INF") #bar_df = bar_df[bar_df.CaseVar > -np.inf]
+        #    nrows = bar_df.shape[0]
+        #    bar_df = bar_df.iloc[np.arange(nrows - 1, -1, -1),:] # reverse order of top 10 rows
+        #    if map_scope == "UScounties":
+        #        labels_to_trim = bar_df["AreaLabel"].astype(str).str.len() > max_width_label
+        #        county_len_arr = max_width_label - 5 - bar_df.loc[labels_to_trim, "Province/State"].astype(str).str.len().values
+        #        county_abbr = [bar_df.loc[labels_to_trim, "County"].astype(str).values[i][:county_len_arr[i]] \
+        #                    for i in range(len(county_len_arr))]
+        #        state_abbr = bar_df.loc[labels_to_trim, "Province/State"].astype(str).values.tolist()
+        #        county_state_abbr = [county_abbr[i] + "..., " + state_abbr[i] for i in range(len(county_abbr))]
+        #        bar_df.loc[labels_to_trim, "AreaLabel"] = county_state_abbr
+        #    elif map_scope == "Australia":
+        #        long_label = "Australian Capital Territory"
+        #        labels_to_trim = bar_df["AreaLabel"].astype(str) == long_label
+        #        bar_df.loc[labels_to_trim, "AreaLabel"] = long_label[:(max_width_label - 3)] + "..."
+        #    area_labels = [label.rjust(max_width_label) for label in bar_df.AreaLabel.values]
+        #    bar_df["ValLabels"] = bar_df.CaseVar.astype("float")
+        #
+        #    # this code repeats what was done to build the initial heatmap above
+        #    cust_data = np.dstack((plot_day_df.loc[:, map_var + map_calc].values, \
+        #                        plot_day_df.loc[:, map_var + map_calc + "PerCapita"]. \
+        #                                    values*map_norm_val))[0]
+        #    location_series = plot_day_df[location_var]
+        #    
+        #    # define the frame, repeating what was done for the initial plots above
+        #    frame = go.Frame(data=[go.Bar(x=pad_10_arr(bar_df[plot_var].values, 0, False),
+        #                                    y=pad_10_arr(area_labels, " " * max_width_label, True),
+        #                                    text=pad_10_arr(bar_df.ValLabels.map(bar_txt_format.format). \
+        #                                                            values, "", False),
+        #                                    textposition="auto",
+        #                                    hoverinfo="none",
+        #                                    name=""),
+        #                            go.Choroplethmapbox(locations=location_series,
+        #                                                featureidkey=geo_json_name_field,
+        #                                                z=plot_day_df.CaseVar,
+        #                                                customdata=cust_data,
+        #                                                name="",
+        #                                                text=plot_day_df.AreaLabel,
+        #                                                hovertemplate="<b>%{text}</b><br>" + \
+        #                                                                "<b>Cases</b>: %{customdata[0]:,}<br>" + \
+        #                                                                "<b>" + map_log_hvr_txt + "</b>: %{customdata[1]:.2e}")],
+        #                        name=numpy_dt64_to_str(day))
+        #    fig_frames.append(frame)
+        #
+        #    # define the slider step
+        #    slider_step = dict(args=[[numpy_dt64_to_str(day)],
+        #                                dict(mode="immediate",
+        #                                    frame=dict(duration=300,
+        #                                                redraw=True))],
+        #                        method="animate",
+        #                        label=numpy_dt64_to_str(day))
+        #    sliders_dict["steps"].append(slider_step)
+        #
+        ##toc_b = time.perf_counter()
+        #
+        # End of code block for building an animation
+        ###############################################################
 
         # Assemble the entire figure based on the components defined above
         fig = subplots.make_subplots(rows=1, cols=2, column_widths=[0.2, 0.8],
@@ -1772,11 +1824,11 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
                           mapbox_zoom=init_zoom,
                           mapbox_accesstoken=token,
                           mapbox_center=map_center,
-                          margin={"r":10,"t":30,"l":10,"b":10},
-                          plot_bgcolor="white",
-                          sliders=[sliders_dict],
-                          updatemenus=fig_ctrls)
-        fig["frames"] = fig_frames
+                          margin={"r": 10, "t": 20, "l": 10, "b": 10},
+                          plot_bgcolor="white")
+                          #sliders=[sliders_dict],
+                          #updatemenus=fig_ctrls)
+        #fig["frames"] = fig_frames
         
         # update the bar plot axes
         if no_data:
@@ -1785,7 +1837,7 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
         else:
             fig.update_xaxes(type=bar_scale_type,
                              ticks="outside",
-                             range=bar_range,
+                             range=plot_range,
                              showgrid=True,
                              gridwidth=0.5,
                              gridcolor="#CCCCCC")
@@ -1806,8 +1858,14 @@ def update_heatmap(map_scope, map_var, map_calc, map_scale, map_norm_type, map_n
             # modify the bar plot title font properties
             fig["layout"]["annotations"][0]["font"] = dict(size=16)
     
+    #toc = time.perf_counter()
+    #print(toc - tic)
+    #print(toc_a - tic)
+    #print(toc_b - toc_a)
+    #print(toc - toc_b)
+    
     # return the figure and hide the dbc.Spinner which is shown during initial app loading
-    return fig, {"display": "none"}
+    return fig, {"display": "none"}, picker_min_date, picker_max_date
 
 #################################################################
 # 11 Callback for Adding Rows to curve_plot_df (dataframe define curves to plot)
@@ -1873,6 +1931,9 @@ def edit_plotted_curves(add_click, clear_click, drop_row_id, country, state, \
 )
 def update_curves_plot(curve_plot_df_as_json, calc, norm_type, norm_val, zero_opt, \
                        types_ls, y_axis_type, avg_period):
+    
+    # for an unknown reason, [norm_val] is provided as a string, so cast it back to an int
+    norm_val = int(norm_val)
     
     # define function which gives a string label for order of magnitude (log10)
     def logtxt(val):
@@ -2067,6 +2128,12 @@ def update_curves_plot(curve_plot_df_as_json, calc, norm_type, norm_val, zero_op
             plot_var_df.Zero_Day = plot_var_df.Zero_Day.dt.days
             plot_var_df = plot_var_df[plot_var_df.Zero_Day > 0]
 
+            # scale per capita columns
+            per_cap_vars = ["ConfirmedPerCapita", "ActivePerCapita", "RecoveredPerCapita", "DeathsPerCapita", \
+                            "ConfirmedPerDatePerCapita", "ActivePerDatePerCapita", \
+                            "RecoveredPerDatePerCapita", "DeathsPerDatePerCapita"]
+            plot_var_df[per_cap_vars] = plot_var_df[per_cap_vars].values*norm_val
+
             # keep track of x-axis range limits across all plotted places
             max_zero_day = max([max_zero_day, plot_var_df.Zero_Day.max()])
             min_date = min([min_date, plot_var_df.Date.min()])
@@ -2155,11 +2222,15 @@ def update_curves_plot(curve_plot_df_as_json, calc, norm_type, norm_val, zero_op
                                      line=dict(dash="dot"), showlegend=True, name='Deaths'))
 
     # setup x-axis
-    if zero_opt == "None":
+    if nplaces == 0:
+        fig.layout.xaxis.range = [0, 1]
+
+    elif zero_opt == "None":
         x_margin = 0.1*(max_date - min_date)
         fig.update_xaxes(title_text="Date", showspikes=True, spikesnap="data", spikemode="across", \
                          spikethickness=2)
         fig.layout.xaxis.range = [pd.to_datetime(min_date - x_margin), pd.to_datetime(max_date + x_margin)]
+            
     else:
         fig.update_xaxes(title_text="Days Having " + str(zero_thresh) + " or More Confirmed Cases", \
                          showspikes=True, spikesnap="data", spikemode="across", spikethickness=2)
@@ -2176,10 +2247,14 @@ def update_curves_plot(curve_plot_df_as_json, calc, norm_type, norm_val, zero_op
             y_min = 0.2
             y_max = max([0.9*np.log10(max(y_nonzero_vals_arr)), 1.1*np.log10(max(y_nonzero_vals_arr))])
         elif (y_axis_type == "log") & (norm_type == "PerCapita"):
-            y_vals_arr = plot_df[plot_vars_ls].values.flatten()
-            y_nonzero_vals_arr = y_vals_arr[y_vals_arr != 0]
-            y_min = min([0.9*np.log10(min(y_nonzero_vals_arr)), 1.1*np.log10(min(y_nonzero_vals_arr))])
-            y_max = max([0.9*np.log10(max(y_nonzero_vals_arr)), 1.1*np.log10(max(y_nonzero_vals_arr))])
+            #y_vals_arr = plot_df[plot_vars_ls].values.flatten()
+            #y_nonzero_vals_arr = y_vals_arr[y_vals_arr != 0]
+            #y_extreme_opts = [0.9*np.log10(min(y_nonzero_vals_arr)), 1.1*np.log10(min(y_nonzero_vals_arr)), \
+            #                  0.9*np.log10(max(y_nonzero_vals_arr)), 1.1*np.log10(max(y_nonzero_vals_arr))]
+            #y_min = min(y_extreme_opts)
+            #y_max = max(y_extreme_opts)
+            y_min = None
+            y_max = None
 
     if calc == "":
         if norm_type == "":
@@ -2559,4 +2634,4 @@ def update_sandbox2_fig(df_as_json):
 
 
 if __name__ == '__main__':
-    app.run_server(debug=False)
+    app.run_server(host="0.0.0.0", port="8050", debug=False)

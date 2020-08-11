@@ -3,6 +3,7 @@
 # using Python 3.8 will break the app!
 pandas
 scipy
+boto3
 matplotlib
 dash
 dash_bootstrap_components

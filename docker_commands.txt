@@ -1,0 +1,10 @@
+docker build -t covid_docker --rm .
+docker run -d -p 127.0.0.1:8050:8050 covid_docker
+docker exec -it 8f2e8fcced57 bash
+docker images
+docker rmi covid_docker -f
+docker rmi $(docker images --filter "dangling=true" -q --no-trunc) -f
+docker ps
+docker stop $(docker ps -aq)
+docker rm $(docker ps -a -f status=exited -q)
+docker save covid_docker > covid_docker.tar

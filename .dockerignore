@@ -1,0 +1,17 @@
+.git
+.gitignore
+.vscode
+/data_raw/
+#/data_clean/Johns_Hopkins_Clean.pkl
+#/data_clean/init_heatmap.pkl
+/jupyter_notebooks/
+docker_commands.txt
+environment.yml
+github_gitignore.txt
+heroku_gitignore.txt
+LICENSE
+procfile
+requirements.txt
+
+# Elastic Beanstalk Files
+.elasticbeanstalk/*
